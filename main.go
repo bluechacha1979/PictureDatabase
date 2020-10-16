@@ -2,45 +2,86 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/gorilla/mux"
-	"log"
-	"math/rand"
+	"github.com/jinzhu/gorm"
+	_ "github.com/mattn/go-sqlite3"
+	"io/ioutil"
 	"net/http"
-	"strconv"
 )
+
+//Database Model
 type Picture struct {
 	ID string `json:"id"`
 	Title string `json:"title"`
 	Body string `json:"body"`
 }
 
-var pictures []Picture
+var database *gorm.DB
+var err error
+
+//Initial Database Migration
+func InitialMigration() {
+	database, err = gorm.Open("sqlite3", "test.db")
+	if err != nil {
+		panic("Failed to connect to database!")
+	}
+	defer database.Close()
+	database.AutoMigrate(&Picture{})
+}
 
 func main() {
 
-	router := mux.NewRouter()
+	InitialMigration()
 
-	//pictures = append(pictures, Picture{ID: "1", Title: "My first post", Body: "This is the content of my first post"})
+	database, err = gorm.Open("sqlite3", "test.db")
+	if err != nil {
+		panic("Failed to connect to database!")
+	}
 
-	router.HandleFunc("/pictures", createPicture).Methods("POST")
-	router.HandleFunc("/pictures", getPictures).Methods("GET")
-	//router.HandleFunc("/pictures/{id}", getPicture).Methods("GET")
+	handleRequests()
 
-	log.Fatal(http.ListenAndServe(":8080", router))
+	defer database.Close()
 }
 
+
+//Routes
+func handleRequests() {
+	router := mux.NewRouter().StrictSlash(true)
+	router.HandleFunc("/pictures", createPicture).Methods("POST")
+	router.HandleFunc("/pictures", getPictures).Methods("GET")
+	router.HandleFunc("/pictures/{id}", getPicture).Methods("GET")
+	http.ListenAndServe(":8080", router)
+}
+
+//Handlers
 func createPicture (w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	reqBody, _ := ioutil.ReadAll(r.Body)
 	var picture Picture
-	_ = json.NewDecoder(r.Body).Decode(&picture)
-	picture.ID = strconv.Itoa(rand.Intn(1000000))
-	pictures = append(pictures, picture)
-	json.NewEncoder(w).Encode(&picture)
+	json.Unmarshal(reqBody, &picture)
+	database.Create(&picture)
+	fmt.Println("Creating New Picture")
+	json.NewEncoder(w).Encode(picture)
 }
 
 func getPictures(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	pictures := []Picture{}
+	database.Find(&pictures)
+	fmt.Println("Getting All the Pictures")
+	json.NewEncoder(w).Encode(pictures)
+}
+
+func getPicture(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	pictures := []Picture{}
+	database.Find(&pictures)
+
 	for _, item := range pictures {
-		json.NewEncoder(w).Encode(&item)
+		if item.ID == vars["id"] {
+			json.NewEncoder(w).Encode(item)
+			fmt.Println("Get Single Picture" )
+			return
+		}
 	}
+	fmt.Println("Did not find the Picture")
 }
